@@ -1,0 +1,168 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Cook Predictor is already set up. Add sensors to it from its page."
+    },
+    "step": {
+      "user": {
+        "title": "Cook Predictor",
+        "description": "Predicts when your cook will be done from any temperature probes, and keeps a journal of every cook. Next, add your first sensor.",
+        "data": {
+          "notify": "Send alerts to",
+          "notify_entities": "Also send alerts to",
+          "click_path": "Open when an alert is tapped"
+        },
+        "data_description": {
+          "notify": "Notify services for the heads-up, target, second-temperature and stall alerts, such as a phone's mobile_app service. Leave empty for no notifications.",
+          "notify_entities": "Notify entities. They get the title and the message only.",
+          "click_path": "A dashboard path, such as /lovelace/cook. Phones with the companion app open it when the alert is tapped."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Alerts",
+        "data": {
+          "notify": "Send alerts to",
+          "notify_entities": "Also send alerts to",
+          "click_path": "Open when an alert is tapped"
+        },
+        "data_description": {
+          "notify": "Notify services for the heads-up, target, second-temperature and stall alerts. Leave empty for no notifications.",
+          "notify_entities": "Notify entities. They get the title and the message only.",
+          "click_path": "A dashboard path, such as /lovelace/cook. Phones with the companion app open it when the alert is tapped."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "channel": {
+      "entry_type": "Sensor",
+      "initiate_flow": {
+        "user": "Add sensor",
+        "reconfigure": "Change sensor"
+      },
+      "step": {
+        "user": {
+          "title": "Add a temperature sensor",
+          "description": "Pick the sensor and what it measures. Both stay fixed: to use another sensor later, remove this one and add the other.",
+          "data": {
+            "entity_id": "Sensor",
+            "role": "Measures"
+          }
+        },
+        "details": {
+          "title": "Sensor details",
+          "description": "{entity_id}",
+          "data": {
+            "name": "Name",
+            "ambient": "Cooker",
+            "connection": "Probe connected sensor",
+            "decoder": "Thermometer type"
+          },
+          "data_description": {
+            "name": "Shown on the card, in alerts and in the journal.",
+            "ambient": "The ambient sensor of the cooker this probe is in. Automatic uses the only ambient sensor there is.",
+            "connection": "Optional: a sensor that is off while the probe is unplugged.",
+            "decoder": "Inkbird IBBQ thermometers report an unplugged probe as 3623 °C."
+          }
+        },
+        "reconfigure": {
+          "title": "Change sensor",
+          "description": "{entity_id}",
+          "data": {
+            "name": "Name",
+            "ambient": "Cooker",
+            "connection": "Probe connected sensor",
+            "decoder": "Thermometer type"
+          },
+          "data_description": {
+            "name": "Shown on the card, in alerts and in the journal.",
+            "ambient": "The ambient sensor of the cooker this probe is in. Automatic uses the only ambient sensor there is.",
+            "connection": "Optional: a sensor that is off while the probe is unplugged.",
+            "decoder": "Inkbird IBBQ thermometers report an unplugged probe as 3623 °C."
+          }
+        }
+      },
+      "error": {
+        "already_configured": "This sensor is already added.",
+        "unsupported_unit": "This sensor does not report in °C, °F or K."
+      },
+      "abort": {
+        "already_configured": "This sensor is already added.",
+        "entry_not_loaded": "Cook Predictor is not running. Check its page for an error, then try again."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "unplugged": "Not connected",
+          "warming": "Warming up",
+          "predicting": "Predicting",
+          "stall": "Stall",
+          "unstable": "Unsettled",
+          "stale": "No reading",
+          "done": "Done",
+          "no_target": "No target"
+        }
+      },
+      "done_at": { "name": "Done at" },
+      "journal": {
+        "name": "Journal",
+        "state": { "idle": "No cook", "open": "Cooking", "finished": "Finished" }
+      }
+    },
+    "number": {
+      "target": { "name": "Target" },
+      "warn_min": { "name": "Heads-up before target" },
+      "alert_temp": { "name": "Second alert temperature" },
+      "alert_min": { "name": "Heads-up before second alert" }
+    },
+    "switch": {
+      "alert_on": { "name": "Second alert" }
+    },
+    "button": {
+      "new_cook": { "name": "New cook" },
+      "finish": { "name": "Finish cook" }
+    }
+  },
+  "issues": {
+    "no_probe": {
+      "title": "Cook Predictor has no internal sensor",
+      "description": "Add at least one sensor that measures the food: Settings > Devices & services > Cook Predictor > Add sensor."
+    },
+    "pick_cooker": {
+      "title": "Pick the cooker for some probes",
+      "description": "There is more than one ambient sensor, so these probes need their cooker chosen: {names}. Open each one from Cook Predictor's page and pick its cooker. Until then they are estimated from the trend alone."
+    },
+    "channel_refused": {
+      "title": "A sensor could not be used",
+      "description": "The sensor {name} conflicts with what Cook Predictor recorded for it before. Remove it and add it again."
+    }
+  },
+  "selector": {
+    "role": {
+      "options": {
+        "internal": "Internal: the food",
+        "ambient": "Ambient: the pit, oven or grill"
+      }
+    },
+    "ambient": {
+      "options": {
+        "auto": "Automatic",
+        "none": "None: estimate from the trend"
+      }
+    },
+    "decoder": {
+      "options": {
+        "generic": "Any other",
+        "inkbird": "Inkbird IBBQ"
+      }
+    }
+  }
+}
