@@ -35,12 +35,24 @@ it, and alerts you before the food is ready.
 
 ## Installing
 
-Cook Predictor installs from the Marketplace (Home Assistant 2026.11 and later) or HACS (2026.10):
+Cook Predictor installs from the Marketplace (Home Assistant 2026.11 and later) or HACS (2026.10).
 
-1. Add this repository as a custom repository: **Settings › Marketplace** (or **HACS**) ›
+1. Open this repository in your Home Assistant:
+
+   [![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=benyaming&repository=ha-cook-predictor&category=integration)
+   Home Assistant 2026.11 and later
+
+   [![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=benyaming&repository=ha-cook-predictor&category=integration)
+   Home Assistant 2026.10 with HACS
+
+   Or add it by hand as a custom repository: **Settings › Marketplace** (or **HACS**) ›
    **⋮ › Custom repositories**, the URL of this page, type **Integration**.
 2. Install **Cook Predictor** and restart Home Assistant.
-3. **Settings › Devices & services › Add integration › Cook Predictor.** Choose where alerts
+3. Add the integration:
+
+   [![Open your Home Assistant instance and start setting up Cook Predictor.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=cook_predictor)
+
+   or **Settings › Devices & services › Add integration › Cook Predictor**. Choose where alerts
    go (your phone's `mobile_app_…` service, or notify entities), then add your first sensor.
 
 The card comes with the integration; nothing to add to your dashboard resources. Add it to a
