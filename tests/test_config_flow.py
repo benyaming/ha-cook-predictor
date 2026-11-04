@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from homeassistant.config_entries import SOURCE_RECONFIGURE, SOURCE_USER
+from homeassistant.config_entries import SOURCE_RECONFIGURE, SOURCE_USER, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -49,6 +49,10 @@ async def test_the_first_sensor_follows_the_entry(ha: None, hass: HomeAssistant)
     assert data["key"] == "1"
     assert data["role"] == "internal"
     assert data["name"] == "Brisket"
+    # a new sensor reloads the entry: let it finish, or teardown finds it half set up
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("sensor.brisket_status") is not None
 
 
 async def test_keys_are_never_reused(ha: None, hass: HomeAssistant, entry: MockConfigEntry) -> None:
