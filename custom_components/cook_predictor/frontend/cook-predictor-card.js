@@ -306,6 +306,9 @@ class CookPredictorCard extends HTMLElement {
     // captions and never makes a hidden-everything card look like nothing is set up.
     this._activeCookers = allAmbients.length;
     this._hasInternal = active.some((c) => c.role === 'internal');
+    // All active food probes, including ones hidden from this card, so the cook's start time
+    // (and thus the chart's "Whole cook" range) never shrinks just because a probe is hidden.
+    this._allProbes = active.filter((c) => c.role === 'internal');
     const ambients = allAmbients.filter(shown);
     this._pits = ambients.map((c, i) => ({ ...c, color: PIT_COLORS[i % PIT_COLORS.length] }));
     this._probes = active.filter((c) => c.role === 'internal' && shown(c)).map((c) => ({
@@ -751,7 +754,14 @@ class CookPredictorCard extends HTMLElement {
     }
     this._updateBatteries();
 
+    // The cook's start is the earliest session among ALL active food probes, including ones
+    // hidden from this card, so hiding probes never shortens the chart's "Whole cook" range.
     let earliest = null;
+    for (const p of (this._allProbes || this._probes)) {
+      const pr = this._pred(p);
+      const ss = pr && pr.status !== 'unplugged' && pr.a && pr.a.session_start;
+      if (ss) { const t = Date.parse(ss); if (earliest == null || t < earliest) earliest = t; }
+    }
     this._probes.forEach((p, i) => {
       const el = this._tiles[i];
       const T = this._now(p.key);
@@ -760,10 +770,6 @@ class CookPredictorCard extends HTMLElement {
       const status = pr ? pr.status : T == null ? 'unplugged' : 'warming';
       const targetShown = this._num(p.numbers && p.numbers.target); // in the shown unit
       const target = a.target ?? null; // °C, what the predictor used
-      if (a.session_start && status !== 'unplugged') {
-        const t = Date.parse(a.session_start);
-        if (earliest == null || t < earliest) earliest = t;
-      }
 
       el.classList.toggle('off', T == null);
       const chip = el.querySelector('.chip');
