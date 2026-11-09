@@ -64,6 +64,22 @@ type: custom:cook-predictor-card
 
 A panel view suits it best on a phone.
 
+Every part of the card is optional. Open its **visual editor** (edit the dashboard ▸ the card ▸
+the config dialog) to choose which probes and cookers show and to hide the journal, the finish /
+new-cook buttons, the settings gear, the battery chips or the chart — or set the same options in
+YAML:
+
+```yaml
+type: custom:cook-predictor-card
+title: Brisket day        # optional title override
+hidden_channels: ["3"]    # hide a probe or cooker by its number
+show_journal: false       # hide the Journal button
+show_actions: false       # hide Finish / New cook
+show_settings: false      # hide the settings (gear) button
+show_batteries: false     # hide the battery chips
+show_chart: false         # hide the chart, zoom and legend
+```
+
 ## Adding sensors
 
 From Cook Predictor's page: **Add sensor**. Pick the sensor (temperature sensors only) and
