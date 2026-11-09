@@ -196,11 +196,18 @@ class CookPredictorCard extends HTMLElement {
     return {};
   }
 
+  static getConfigElement() {
+    return document.createElement('cook-predictor-card-editor');
+  }
+
   setConfig(config) {
     this._config = { hours: 30, ...config };
     this._hidden = this._hidden || new Set();
     this._view = null;
     this._built = null;
+    // A display-option change (from the visual editor) must re-render against the last
+    // snapshot, since no new stream event is coming just because the card config changed.
+    if (this._cfg && this._hass) this._setConfig(this._cfg);
   }
 
   getCardSize() {
@@ -281,21 +288,41 @@ class CookPredictorCard extends HTMLElement {
     }
   }
 
+  // Channel keys the card config hides (chosen in the visual editor).
+  _hiddenChannels() {
+    return new Set((this._config.hidden_channels || []).map((k) => String(k)));
+  }
+
   _setConfig(cfg) {
     this._cfg = cfg;
+    const hidden = this._hiddenChannels();
+    const shown = (c) => !hidden.has(String(c.key));
     const active = cfg.channels.filter((c) => c.active !== false);
-    const ambients = active.filter((c) => c.role === 'ambient');
     const color = (c) => COLORS[(Math.max(1, parseInt(c.key, 10) || 1) - 1) % COLORS.length];
+    // Resolve a probe's cooker against ALL active ambients, so hiding a cooker chip never makes
+    // its probes read "no pit sensor"; the hidden set only filters what is DISPLAYED.
+    const allAmbients = active.filter((c) => c.role === 'ambient');
+    // Based on all active channels, not the displayed subset, so hiding a chip keeps the probe
+    // captions and never makes a hidden-everything card look like nothing is set up.
+    this._activeCookers = allAmbients.length;
+    this._hasInternal = active.some((c) => c.role === 'internal');
+    // All active food probes, including ones hidden from this card, so the cook's start time
+    // (and thus the chart's "Whole cook" range) never shrinks just because a probe is hidden.
+    this._allProbes = active.filter((c) => c.role === 'internal');
+    const ambients = allAmbients.filter(shown);
     this._pits = ambients.map((c, i) => ({ ...c, color: PIT_COLORS[i % PIT_COLORS.length] }));
-    this._probes = active.filter((c) => c.role === 'internal').map((c) => ({
-      ...c, color: color(c), pit: ambients.find((a) => a.key === c.ambient) || null,
+    this._probes = active.filter((c) => c.role === 'internal' && shown(c)).map((c) => ({
+      ...c, color: color(c), pit: allAmbients.find((a) => a.key === c.ambient) || null,
     }));
     // removed lately: a line on the chart for the cook they were in, no tile
-    this._retired = cfg.channels.filter((c) => c.active === false).map((c, i) => ({
+    this._retired = cfg.channels.filter((c) => c.active === false && shown(c)).map((c, i) => ({
       ...c, color: c.role === 'internal' ? color(c) : PIT_COLORS[(ambients.length + i) % PIT_COLORS.length],
     }));
     const shape = JSON.stringify(cfg.channels.map((c) => [c.key, c.name, c.role, c.ambient, c.active]))
-      + JSON.stringify(cfg.batteries) + this._gen;
+      + JSON.stringify(cfg.batteries) + this._gen
+      // display options that change the built DOM force a rebuild too
+      + JSON.stringify([this._config.title, this._config.hidden_channels, this._config.show_journal,
+        this._config.show_actions, this._config.show_settings, this._config.show_batteries, this._config.show_chart]);
     if (this._built !== shape) this._build(shape);
     this._update();
   }
@@ -362,7 +389,8 @@ class CookPredictorCard extends HTMLElement {
         <div class="journal-wrap" hidden></div>
       </ha-card>`;
     root.querySelector('.title').textContent = this._config.title || cfg.title || 'Cook';
-    if (!this._probes.length) {
+    if (!this._hasInternal) {
+      // Genuinely no food probe configured (not merely all hidden by the card config).
       root.querySelector('.probes').outerHTML = `<div class="notice">No food probe yet. ${this._hass.user && this._hass.user.is_admin
         ? 'Add one with the gear button: Add sensor, then pick it as Internal.' : 'Ask an administrator to add one.'}</div>`;
     }
@@ -420,7 +448,7 @@ class CookPredictorCard extends HTMLElement {
       el.style.setProperty('--c', p.color);
       el.innerHTML = `
         <div class="tile-head"><span class="name"><i></i><span></span></span><span class="chip"></span></div>
-        ${this._pits.length > 1 ? `<div class="cooker">${p.pit ? `in ${esc(p.pit.name)}` : 'no pit sensor'}</div>` : ''}
+        ${this._activeCookers > 1 ? `<div class="cooker">${p.pit ? `in ${esc(p.pit.name)}` : 'no pit sensor'}</div>` : ''}
         <div class="ring-wrap">
           <svg class="ring" viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="52"/>
             <circle class="arc" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"/></svg>
@@ -555,6 +583,16 @@ class CookPredictorCard extends HTMLElement {
     if (this._ro) this._ro.disconnect();
     this._ro = new ResizeObserver(() => this._drawChart());
     this._ro.observe(root.querySelector('.chart-wrap'));
+
+    // Visual-editor display toggles: hide whatever the card config turns off. These only ever
+    // hide (never reveal), so a button already hidden for lack of an entity stays hidden.
+    const hide = (sel) => root.querySelectorAll(sel).forEach((el) => { el.hidden = true; });
+    if (this._config.show_journal === false) hide('.journal');
+    if (this._config.show_actions === false) { hide('.finish'); hide('.reset'); }
+    if (this._config.show_settings === false) hide('.sensors');
+    if (this._config.show_batteries === false) hide('.battery');
+    if (this._config.show_chart === false) { hide('.chart-bar'); hide('.chart-wrap'); hide('.scroll'); hide('.legend'); }
+
     this._built = shape;
   }
 
@@ -716,7 +754,14 @@ class CookPredictorCard extends HTMLElement {
     }
     this._updateBatteries();
 
+    // The cook's start is the earliest session among ALL active food probes, including ones
+    // hidden from this card, so hiding probes never shortens the chart's "Whole cook" range.
     let earliest = null;
+    for (const p of (this._allProbes || this._probes)) {
+      const pr = this._pred(p);
+      const ss = pr && pr.status !== 'unplugged' && pr.a && pr.a.session_start;
+      if (ss) { const t = Date.parse(ss); if (earliest == null || t < earliest) earliest = t; }
+    }
     this._probes.forEach((p, i) => {
       const el = this._tiles[i];
       const T = this._now(p.key);
@@ -725,10 +770,6 @@ class CookPredictorCard extends HTMLElement {
       const status = pr ? pr.status : T == null ? 'unplugged' : 'warming';
       const targetShown = this._num(p.numbers && p.numbers.target); // in the shown unit
       const target = a.target ?? null; // °C, what the predictor used
-      if (a.session_start && status !== 'unplugged') {
-        const t = Date.parse(a.session_start);
-        if (earliest == null || t < earliest) earliest = t;
-      }
 
       el.classList.toggle('off', T == null);
       const chip = el.querySelector('.chip');
@@ -806,7 +847,7 @@ class CookPredictorCard extends HTMLElement {
     else if (from != null) elapsed.querySelector('.elapsed-val').textContent = fmtDur((Date.now() - from) / 60000);
     const finBtn = root.querySelector('.finish');
     const showing = ['armed', 'busy', 'done', 'failed'].some((c) => finBtn.classList.contains(c));
-    if (this._cfg.buttons.finish) finBtn.hidden = jstate !== 'open' && !showing;
+    if (this._cfg.buttons.finish) finBtn.hidden = this._config.show_actions === false || (jstate !== 'open' && !showing);
     this._sessionStart = earliest;
 
     if (!this._drawnAt || Date.now() - this._drawnAt > 5000) this._drawChart();
@@ -901,6 +942,7 @@ class CookPredictorCard extends HTMLElement {
   _drawChart() {
     const root = this.shadowRoot;
     if (!root || !this._hass || !this._built) return;
+    if (this._config.show_chart === false) return; // chart hidden by the card config
     const svg = root.querySelector('svg.chart');
     const W = svg.clientWidth;
     const H = svg.clientHeight;
@@ -1288,4 +1330,156 @@ if (!window.customCards.some((c) => c.type === 'cook-predictor-card')) {
     description: 'Your probes with their predicted finish, alerts, a cook chart and the journal',
     preview: false,
   });
+}
+
+/* ------------------------------- visual editor -------------------------------
+ * Lets you choose which probes and cookers show and which parts of the card appear,
+ * without touching YAML. The probe list is read live from the integration (the same
+ * snapshot the card uses); with no integration yet, only the part-toggles are offered.
+ */
+const EDITOR_LABELS = {
+  title: 'Card title',
+  show_journal: 'Journal button',
+  show_actions: 'Finish / New-cook buttons',
+  show_settings: 'Settings (gear) button',
+  show_batteries: 'Battery chips',
+  show_chart: 'Chart, zoom and legend',
+};
+const EDITOR_TOGGLES = ['show_journal', 'show_actions', 'show_settings', 'show_batteries', 'show_chart'];
+
+class CookPredictorCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    if (this._form) this._form.hass = hass;
+    if (first && hass) this._loadChannels();
+  }
+
+  connectedCallback() {
+    // Retry if an earlier attempt was cancelled before any snapshot arrived.
+    if (!this._channels && this._hass) this._loadChannels();
+  }
+
+  disconnectedCallback() {
+    if (this._unsub) { this._callUnsub(this._unsub); this._unsub = null; }
+  }
+
+  // subscribeMessage's unsubscribe returns a promise; swallow both sync throws and rejections.
+  _callUnsub(unsub) {
+    try { const r = unsub(); if (r && typeof r.then === 'function') r.catch(() => {}); } catch (e) { /* ignore */ }
+  }
+
+  // Grab the channel list once from the integration's snapshot, then stop listening.
+  async _loadChannels() {
+    if (this._channels || this._loading || !this._hass) return;
+    this._loading = true;
+    try {
+      let got = false;
+      const unsub = await this._hass.connection.subscribeMessage(
+        (m) => {
+          if (got || !m || m.type !== 'snapshot' || !m.config) return;
+          got = true;
+          this._channels = (m.config.channels || []).filter((c) => c.active !== false);
+          if (this._unsub) { this._callUnsub(this._unsub); this._unsub = null; }
+          this._render();
+        },
+        { type: `${DOMAIN}/subscribe` },
+      );
+      if (got || !this.isConnected) this._callUnsub(unsub); else this._unsub = unsub;
+    } catch (e) {
+      // Integration unavailable -> stable empty (part-toggles only). A transient failure leaves
+      // channels unset so a later connectedCallback (DOM re-attach) retries, rather than caching
+      // an empty list forever.
+      const code = e && e.code;
+      if (code === 'unknown_command' || code === 'not_loaded' || code === 'not_found') this._channels = [];
+      this._render();
+    } finally {
+      this._loading = false;
+    }
+  }
+
+  _label(s) {
+    if (s.name && s.name.indexOf('ch_') === 0) {
+      const key = s.name.slice(3);
+      const c = (this._channels || []).find((ch) => String(ch.key) === key);
+      const base = c ? c.name : `Channel ${key}`;
+      return `Show ${base}${c && c.role === 'ambient' ? ' (cooker)' : ''}`;
+    }
+    return EDITOR_LABELS[s.name] || s.name;
+  }
+
+  _schema() {
+    const base = [
+      { name: 'title', selector: { text: {} } },
+      ...EDITOR_TOGGLES.map((name) => ({ name, selector: { boolean: {} } })),
+    ];
+    const chans = (this._channels || []).map((c) => ({ name: `ch_${c.key}`, selector: { boolean: {} } }));
+    return base.concat(chans);
+  }
+
+  _data() {
+    const c = this._config || {};
+    const hidden = new Set((c.hidden_channels || []).map((k) => String(k)));
+    const d = { title: c.title || '' };
+    EDITOR_TOGGLES.forEach((k) => { d[k] = c[k] !== false; });
+    (this._channels || []).forEach((ch) => { d[`ch_${ch.key}`] = !hidden.has(String(ch.key)); });
+    return d;
+  }
+
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    if (!this._config) return;
+    const v = ev.detail.value || {};
+    const cfg = { ...this._config }; // keep type and any keys the editor doesn't manage
+    if (v.title && v.title.trim()) cfg.title = v.title; else delete cfg.title;
+    EDITOR_TOGGLES.forEach((k) => { if (v[k] === false) cfg[k] = false; else delete cfg[k]; });
+    // hidden_channels: channels toggled off here, plus any previously-hidden key we don't know yet.
+    const known = new Set((this._channels || []).map((ch) => String(ch.key)));
+    const offKnown = (this._channels || []).filter((ch) => v[`ch_${ch.key}`] === false).map((ch) => String(ch.key));
+    const keepUnknown = (this._config.hidden_channels || []).map(String).filter((k) => !known.has(k));
+    const hidden = Array.from(new Set([...offKnown, ...keepUnknown]));
+    if (hidden.length) cfg.hidden_channels = hidden; else delete cfg.hidden_channels;
+    this._config = cfg;
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: cfg }, bubbles: true, composed: true }));
+  }
+
+  async _render() {
+    if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
+    if (!customElements.get('ha-form') && window.loadCardHelpers) {
+      try {
+        const h = await window.loadCardHelpers();
+        const c = h.createCardElement({ type: 'entities', entities: [] });
+        if (c && c.constructor.getConfigElement) await c.constructor.getConfigElement();
+      } catch (e) { /* ignore */ }
+    }
+    if (!customElements.get('ha-form')) {
+      this.shadowRoot.innerHTML = '<div style="padding:12px;color:var(--error-color)">The form editor could not load. Reopen the card editor, or edit this card in YAML.</div>';
+      this._form = null;
+      return;
+    }
+    if (!this._form) {
+      this.shadowRoot.innerHTML = '';
+      this._note = document.createElement('div');
+      this._note.style.cssText = 'font-size:.85em;color:var(--secondary-text-color);margin:4px 2px 12px;line-height:1.4';
+      this._form = document.createElement('ha-form');
+      this._form.computeLabel = (s) => this._label(s);
+      this._form.addEventListener('value-changed', (e) => this._valueChanged(e));
+      this.shadowRoot.append(this._note, this._form);
+    }
+    this._note.textContent = (this._channels && this._channels.length)
+      ? 'Choose which probes and cookers show, and which parts of the card appear. Leave everything on for the default.'
+      : 'Set up Cook Predictor to pick individual probes; you can still toggle the card’s parts below.';
+    this._form.hass = this._hass;
+    this._form.schema = this._schema();
+    this._form.data = this._data();
+  }
+}
+
+if (!customElements.get('cook-predictor-card-editor')) {
+  customElements.define('cook-predictor-card-editor', CookPredictorCardEditor);
 }
