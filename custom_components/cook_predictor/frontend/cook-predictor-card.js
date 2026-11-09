@@ -302,6 +302,10 @@ class CookPredictorCard extends HTMLElement {
     // Resolve a probe's cooker against ALL active ambients, so hiding a cooker chip never makes
     // its probes read "no pit sensor"; the hidden set only filters what is DISPLAYED.
     const allAmbients = active.filter((c) => c.role === 'ambient');
+    // Based on all active channels, not the displayed subset, so hiding a chip keeps the probe
+    // captions and never makes a hidden-everything card look like nothing is set up.
+    this._activeCookers = allAmbients.length;
+    this._hasInternal = active.some((c) => c.role === 'internal');
     const ambients = allAmbients.filter(shown);
     this._pits = ambients.map((c, i) => ({ ...c, color: PIT_COLORS[i % PIT_COLORS.length] }));
     this._probes = active.filter((c) => c.role === 'internal' && shown(c)).map((c) => ({
@@ -382,7 +386,8 @@ class CookPredictorCard extends HTMLElement {
         <div class="journal-wrap" hidden></div>
       </ha-card>`;
     root.querySelector('.title').textContent = this._config.title || cfg.title || 'Cook';
-    if (!this._probes.length) {
+    if (!this._hasInternal) {
+      // Genuinely no food probe configured (not merely all hidden by the card config).
       root.querySelector('.probes').outerHTML = `<div class="notice">No food probe yet. ${this._hass.user && this._hass.user.is_admin
         ? 'Add one with the gear button: Add sensor, then pick it as Internal.' : 'Ask an administrator to add one.'}</div>`;
     }
@@ -440,7 +445,7 @@ class CookPredictorCard extends HTMLElement {
       el.style.setProperty('--c', p.color);
       el.innerHTML = `
         <div class="tile-head"><span class="name"><i></i><span></span></span><span class="chip"></span></div>
-        ${this._pits.length > 1 ? `<div class="cooker">${p.pit ? `in ${esc(p.pit.name)}` : 'no pit sensor'}</div>` : ''}
+        ${this._activeCookers > 1 ? `<div class="cooker">${p.pit ? `in ${esc(p.pit.name)}` : 'no pit sensor'}</div>` : ''}
         <div class="ring-wrap">
           <svg class="ring" viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="52"/>
             <circle class="arc" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"/></svg>
