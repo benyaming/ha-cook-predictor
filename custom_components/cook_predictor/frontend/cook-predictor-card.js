@@ -304,8 +304,12 @@ class CookPredictorCard extends HTMLElement {
     // handlers and each probe's _fields are bound to the objects derived below, so an
     // identical config keeps them: fresh objects without a rebuild have no _fields, _update
     // throws, and Home Assistant swaps the card for "Configuration error". Any difference
-    // (the whole config, entity ids from the registry included, or a display option) rebuilds.
-    const shape = JSON.stringify(cfg) + this._gen
+    // (the whole config, entity ids from the registry included, or a display option) rebuilds,
+    // except `revision`: the control log's counter rises on every setting change and button
+    // press, the card never reads it, and a rebuild for it would close the journal and the
+    // alert panels on the next resubscribe.
+    const { revision, ...stable } = cfg;
+    const shape = JSON.stringify(stable) + this._gen
       + JSON.stringify([this._config.title, this._config.hidden_channels, this._config.show_journal,
         this._config.show_actions, this._config.show_settings, this._config.show_batteries, this._config.show_chart]);
     if (this._built === shape) {
