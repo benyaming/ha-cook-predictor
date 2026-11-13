@@ -861,8 +861,17 @@ class CookPredictorCard extends HTMLElement {
     const showing = ['armed', 'busy', 'done', 'failed'].some((c) => finBtn.classList.contains(c));
     if (this._cfg.buttons.finish) finBtn.hidden = this._config.show_actions === false || (jstate !== 'open' && !showing);
     this._sessionStart = earliest;
+    // The chart's cook is the one the journal shows (open, or finished lately): its start
+    // bounds the chart, so neither the lead-in nor a probe still in an older session reaches
+    // back into the cook before it (New cook, or a probe plugged in again, ends one cook and
+    // starts the next while the probes keep reading).
+    this._cookStart = (jstate === 'open' || finished) && ja.start ? Date.parse(ja.start) : null;
 
-    if (!this._drawnAt || Date.now() - this._drawnAt > 5000) this._drawChart();
+    const bounds = `${this._sessionStart}|${this._cookStart}`;
+    if (bounds !== this._bounds || !this._drawnAt || Date.now() - this._drawnAt > 5000) {
+      this._bounds = bounds;
+      this._drawChart();
+    }
   }
 
   // A setting's input shows '' (placeholder "off") for an off value; _value reads it back.
@@ -966,11 +975,13 @@ class CookPredictorCard extends HTMLElement {
     const probes = this._probes.filter((p) => shown(p.key));
     const u = (c) => this._u(c);
 
-    // The whole cook runs from the session start to past the last forecast; the view is that,
-    // its last stretch up to now plus the forecasts (a range chip), or a zoomed span.
+    // The whole cook runs from the session start (with a 10-minute lead-in, never before the
+    // journal's cook) to past the last forecast; the view is that, its last stretch up to now
+    // plus the forecasts (a range chip), or a zoomed span.
     const forecasts = probes.map((p) => this._forecast(p, now)).filter(Boolean);
+    const lead = this._sessionStart != null ? this._sessionStart - 10 * 60e3 : now - 6 * 3600e3;
     const full = [
-      this._sessionStart != null ? this._sessionStart - 10 * 60e3 : now - 6 * 3600e3,
+      this._cookStart != null ? Math.max(lead, this._cookStart) : lead,
       Math.max(now + 15 * 60e3, ...forecasts.map((f) => f.end + 10 * 60e3)),
     ];
     this._full = full;
