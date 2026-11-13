@@ -216,6 +216,10 @@ class CookPredictorCard extends HTMLElement {
 
   connectedCallback() {
     this._timer = setInterval(() => this._hass && this._cfg && this._update(), 30000);
+    // Detaching stops the resize observer; a card re-attached with the same config keeps its
+    // build (see _setConfig), so the chart needs it back here, not from _build.
+    const wrap = this._ro && this._built && this.shadowRoot && this.shadowRoot.querySelector('.chart-wrap');
+    if (wrap) this._ro.observe(wrap);
     if (this._hass) this._subscribe();
   }
 
@@ -295,6 +299,23 @@ class CookPredictorCard extends HTMLElement {
 
   _setConfig(cfg) {
     this._cfg = cfg;
+    // Every subscribe gets a snapshot, so the same config comes back on each resubscribe (a
+    // websocket reconnect, the card re-attached, a gap in the stream). The tiles, their
+    // handlers and each probe's _fields are bound to the objects derived below, so an
+    // identical config keeps them: fresh objects without a rebuild have no _fields, _update
+    // throws, and Home Assistant swaps the card for "Configuration error". Any difference
+    // (the whole config, entity ids from the registry included, or a display option) rebuilds,
+    // except `revision`: the control log's counter rises on every setting change and button
+    // press, the card never reads it, and a rebuild for it would close the journal and the
+    // alert panels on the next resubscribe.
+    const { revision, ...stable } = cfg;
+    const shape = JSON.stringify(stable) + this._gen
+      + JSON.stringify([this._config.title, this._config.hidden_channels, this._config.show_journal,
+        this._config.show_actions, this._config.show_settings, this._config.show_batteries, this._config.show_chart]);
+    if (this._built === shape) {
+      this._update();
+      return;
+    }
     const hidden = this._hiddenChannels();
     const shown = (c) => !hidden.has(String(c.key));
     const active = cfg.channels.filter((c) => c.active !== false);
@@ -318,12 +339,7 @@ class CookPredictorCard extends HTMLElement {
     this._retired = cfg.channels.filter((c) => c.active === false && shown(c)).map((c, i) => ({
       ...c, color: c.role === 'internal' ? color(c) : PIT_COLORS[(ambients.length + i) % PIT_COLORS.length],
     }));
-    const shape = JSON.stringify(cfg.channels.map((c) => [c.key, c.name, c.role, c.ambient, c.active]))
-      + JSON.stringify(cfg.batteries) + this._gen
-      // display options that change the built DOM force a rebuild too
-      + JSON.stringify([this._config.title, this._config.hidden_channels, this._config.show_journal,
-        this._config.show_actions, this._config.show_settings, this._config.show_batteries, this._config.show_chart]);
-    if (this._built !== shape) this._build(shape);
+    this._build(shape);
     this._update();
   }
 
@@ -849,8 +865,17 @@ class CookPredictorCard extends HTMLElement {
     const showing = ['armed', 'busy', 'done', 'failed'].some((c) => finBtn.classList.contains(c));
     if (this._cfg.buttons.finish) finBtn.hidden = this._config.show_actions === false || (jstate !== 'open' && !showing);
     this._sessionStart = earliest;
+    // The chart's cook is the one the journal shows (open, or finished lately): its start
+    // bounds the chart, so neither the lead-in nor a probe still in an older session reaches
+    // back into the cook before it (New cook, or a probe plugged in again, ends one cook and
+    // starts the next while the probes keep reading).
+    this._cookStart = (jstate === 'open' || finished) && ja.start ? Date.parse(ja.start) : null;
 
-    if (!this._drawnAt || Date.now() - this._drawnAt > 5000) this._drawChart();
+    const bounds = `${this._sessionStart}|${this._cookStart}`;
+    if (bounds !== this._bounds || !this._drawnAt || Date.now() - this._drawnAt > 5000) {
+      this._bounds = bounds;
+      this._drawChart();
+    }
   }
 
   // A setting's input shows '' (placeholder "off") for an off value; _value reads it back.
@@ -954,11 +979,13 @@ class CookPredictorCard extends HTMLElement {
     const probes = this._probes.filter((p) => shown(p.key));
     const u = (c) => this._u(c);
 
-    // The whole cook runs from the session start to past the last forecast; the view is that,
-    // its last stretch up to now plus the forecasts (a range chip), or a zoomed span.
+    // The whole cook runs from the session start (with a 10-minute lead-in, never before the
+    // journal's cook) to past the last forecast; the view is that, its last stretch up to now
+    // plus the forecasts (a range chip), or a zoomed span.
     const forecasts = probes.map((p) => this._forecast(p, now)).filter(Boolean);
+    const lead = this._sessionStart != null ? this._sessionStart - 10 * 60e3 : now - 6 * 3600e3;
     const full = [
-      this._sessionStart != null ? this._sessionStart - 10 * 60e3 : now - 6 * 3600e3,
+      this._cookStart != null ? Math.max(lead, this._cookStart) : lead,
       Math.max(now + 15 * 60e3, ...forecasts.map((f) => f.end + 10 * 60e3)),
     ];
     this._full = full;
